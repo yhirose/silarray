@@ -1,11 +1,10 @@
-#include <mtlcpp.h>
+#include <silarray.h>
 
-#include <iostream>
 #include <ranges>
 
 #include "doctest.h"
 
-using namespace mtl;
+using namespace sil;
 
 auto itoa(size_t size, size_t init = 1) {
   return std::views::iota(init) | std::views::take(size);
@@ -252,6 +251,90 @@ TEST_CASE("array: matrix m*v `dot` operation") {
   CHECK(array_equal(out, {30, 70}));
 }
 
+TEST_CASE("array: matrix m*m float `dot` operation") {
+  auto a = array<float>({3, 4}, std::vector<float>{1,2,3,4,5,6,7,8,9,10,11,12});
+  auto b = array<float>({4, 2}, std::vector<float>{1,2,3,4,5,6,7,8});
+  auto out = a.dot(b);
+  CHECK(out.shape() == shape_type{3, 2});
+  CHECK(array_equal(out, {{50, 60}, {114, 140}, {178, 220}}));
+}
+
+TEST_CASE("array: float linear (dot + add) chain") {
+  auto x = array<float>({2, 3}, std::vector<float>{1,2,3,4,5,6});
+  auto W = array<float>({3, 2}, std::vector<float>{1,2,3,4,5,6});
+  auto b = array<float>({2}, std::vector<float>{10,20});
+  auto out = x.linear(W, b);
+  CHECK(array_equal(out, {{32, 48}, {59, 84}}));
+
+  auto W2 = array<float>({2, 1}, std::vector<float>{1, 1});
+  auto b2 = array<float>({1}, std::vector<float>{0});
+  auto sig = out.sigmoid();
+  auto out2 = sig.linear(W2, b2);
+  CHECK(out2.shape() == shape_type{2, 1});
+
+  auto p = out2.element_cbegin();
+  CHECK(*p == doctest::Approx(2.0).epsilon(0.01));
+}
+
+TEST_CASE("array: sigmoid") {
+  // Known values: sigmoid(0) = 0.5, sigmoid(large) ≈ 1, sigmoid(-large) ≈ 0
+  auto a = array<float>{0.0f, 1.0f, -1.0f, 5.0f, -5.0f};
+  auto s = a.sigmoid();
+  CHECK(is_close(s.at(0), 0.5f, 1e-3f));
+  CHECK(is_close(s.at(1), 0.7310f, 1e-3f));
+  CHECK(is_close(s.at(2), 0.2689f, 1e-3f));
+  CHECK(s.at(3) > 0.99f);
+  CHECK(s.at(4) < 0.01f);
+
+  // 2D: small matrix
+  auto m = array<float>{{0.0f, 1.0f}, {-1.0f, 5.0f}};
+  auto ms = m.sigmoid();
+  CHECK(ms.shape() == shape_type{2, 2});
+  CHECK(is_close(ms[0, 0], 0.5f, 1e-3f));
+  CHECK(is_close(ms[0, 1], 0.7310f, 1e-3f));
+
+  // 2D: larger matrix to exercise GPU path
+  auto big = sil::random({64, 128});
+  auto big_s = big.sigmoid();
+  CHECK(big_s.shape() == shape_type{64, 128});
+  CHECK(big_s.all([](auto x) { return x >= 0.0f && x <= 1.0f; }));
+}
+
+TEST_CASE("array: relu") {
+  auto a = array<float>{-2.0f, -1.0f, 0.0f, 1.0f, 2.0f};
+  auto r = a.relu();
+  CHECK(is_close(r.at(0), 0.0f));
+  CHECK(is_close(r.at(1), 0.0f));
+  CHECK(is_close(r.at(2), 0.0f));
+  CHECK(is_close(r.at(3), 1.0f));
+  CHECK(is_close(r.at(4), 2.0f));
+
+  // 2D: exercise GPU path
+  auto big = sil::random({64, 128}) - sil::array<float>(0.5f);
+  auto big_r = big.relu();
+  CHECK(big_r.shape() == shape_type{64, 128});
+  CHECK(big_r.all([](auto x) { return x >= 0.0f; }));
+}
+
+TEST_CASE("array: float dot with transpose") {
+  auto x = sil::ones<float>({4, 3});
+  auto dout = sil::ones<float>({4, 2});
+  auto W = sil::ones<float>({3, 2}) * 0.5f;
+
+  // backward-like ops
+  auto dx = dout.dot(W.transpose());  // (4,2) dot (2,3) = (4,3)
+  CHECK(dx.shape() == shape_type{4, 3});
+  auto p = dx.element_cbegin();
+  CHECK(*p == doctest::Approx(1.0).epsilon(0.01));
+
+  auto dW = x.transpose().dot(dout);  // (3,4) dot (4,2) = (3,2)
+  CHECK(dW.shape() == shape_type{3, 2});
+  auto q = dW.element_cbegin();
+  CHECK(*q == doctest::Approx(4.0).epsilon(0.01));
+}
+
+
+
 TEST_CASE("array: matrix transpose") {
   auto v = array<int>{1, 2, 3, 4};
   auto vT = v.transpose();
@@ -410,6 +493,16 @@ TEST_CASE("array: aggregate functions") {
   CHECK(is_close(array<float>{1.1, 2.2}.sum(), 3.3));
   CHECK(is_close(array<int>{1, 2}.sum(), 3l));
 
+  // Larger sizes to exercise GPU paths
+  auto big = sil::ones<float>({10000});
+  CHECK(is_close(big.sum(), 10000.0f, 1.0f));
+
+  auto big2d = sil::ones<float>({256, 128});
+  CHECK(is_close(big2d.sum(), 256.0f * 128.0f, 1.0f));
+  auto big2d_sum0 = big2d.sum(0);
+  CHECK(big2d_sum0.shape() == shape_type{128});
+  CHECK(is_close(big2d_sum0.at(0), 256.0f, 1.0f));
+
   CHECK(v.mean() == 3.5);
   CHECK(t.mean() == 9.5);
 
@@ -418,6 +511,39 @@ TEST_CASE("array: aggregate functions") {
       t.mean(1),
       array<float>{{2.5, 3.5, 4.5}, {8.5, 9.5, 10.5}, {14.5, 15.5, 16.5}}));
   CHECK(array_equal(t.mean(2), array<float>{{2, 5}, {8, 11}, {14, 17}}));
+}
+
+TEST_CASE("array: layer_norm") {
+  // Small known input: 2 rows x 3 cols
+  auto x = array<float>{{1.0f, 2.0f, 3.0f}, {4.0f, 5.0f, 6.0f}};
+  auto gamma = array<float>{1.0f, 1.0f, 1.0f};
+  auto beta = array<float>{0.0f, 0.0f, 0.0f};
+
+  auto out = x.layer_norm(gamma, beta);
+  CHECK(out.shape() == shape_type{2, 3});
+
+  // Each row should be normalized: mean≈0, std≈1
+  // Row 0: [1,2,3] -> mean=2, var=2/3 -> [-1.2247, 0, 1.2247]
+  CHECK(is_close(out[0, 0], -1.2247f, 1e-2f));
+  CHECK(is_close(out[0, 1], 0.0f, 1e-2f));
+  CHECK(is_close(out[0, 2], 1.2247f, 1e-2f));
+
+  // With gamma=2, beta=1
+  auto gamma2 = array<float>{2.0f, 2.0f, 2.0f};
+  auto beta2 = array<float>{1.0f, 1.0f, 1.0f};
+  auto out2 = x.layer_norm(gamma2, beta2);
+  CHECK(is_close(out2[0, 1], 1.0f, 1e-2f));  // 0 * 2 + 1 = 1
+
+  // Larger matrix to exercise GPU path
+  auto big = sil::random({64, 256});
+  auto g = sil::ones<float>({256});
+  auto b = sil::zeros<float>({256});
+  auto big_out = big.layer_norm(g, b);
+  CHECK(big_out.shape() == shape_type{64, 256});
+  // Each row should have mean≈0
+  for (size_t i = 0; i < 64; i++) {
+    CHECK(is_close(big_out[i].mean(), 0.0f, 0.1f));
+  }
 }
 
 TEST_CASE("array: softmax") {
@@ -432,6 +558,21 @@ TEST_CASE("array: softmax") {
 
   CHECK(array_equal(msm.sum(1), array<float>{1, 1}));
   CHECK(msm.all([](auto x) { return x <= 1; }));
+
+  // Numerical accuracy check for known values
+  auto a = array<float>{1.0f, 2.0f, 3.0f};
+  auto sm = a.softmax();
+  CHECK(is_close(sm.at(0), 0.0900f, 1e-3f));
+  CHECK(is_close(sm.at(1), 0.2447f, 1e-3f));
+  CHECK(is_close(sm.at(2), 0.6652f, 1e-3f));
+
+  // 2D: larger matrix to exercise GPU path
+  auto big = sil::random({64, 32});
+  auto big_sm = big.softmax();
+  CHECK(big_sm.shape() == shape_type{64, 32});
+  for (size_t i = 0; i < 64; i++) {
+    CHECK(is_close(big_sm[i].sum(), 1.0f, 1e-3f));
+  }
 }
 
 TEST_CASE("array: iterators") {
@@ -466,6 +607,28 @@ TEST_CASE("array: iterators") {
   }
 }
 
+TEST_CASE("array: aggregate on slice") {
+  auto m = array<int>{{10, 20, 30}, {1, 2, 3}};
+  auto row = m[1];
+  CHECK(row.min() == 1);
+  CHECK(row.max() == 3);
+  CHECK(row.count() == 3);
+  CHECK(row.all(1) == false);
+}
+
+TEST_CASE("array: broadcast same dim different shape") {
+  auto a = array<int>({3, 1}, std::vector{1, 2, 3});
+  auto b = array<int>({1, 3}, std::vector{10, 20, 30});
+  auto c = a + b;
+  CHECK(array_equal(c, {{11, 21, 31}, {12, 22, 32}, {13, 23, 33}}));
+}
+
+TEST_CASE("array: argmax") {
+  auto m = array<int>{{3, 1, 2}, {6, 8, 7}};
+  auto result = m.argmax();
+  CHECK(array_equal(result, {0, 1}));
+}
+
 TEST_CASE("array: one hot") {
   auto v = array<float>{0, 1, 5, 9};
 
@@ -475,5 +638,70 @@ TEST_CASE("array: one hot") {
                                        {0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
                                        {0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
                                    }));
+}
+
+TEST_CASE("msl: add float") {
+  auto a = array<float>{1.0f, 2.0f, 3.0f, 4.0f};
+  auto b = array<float>{10.0f, 20.0f, 30.0f, 40.0f};
+
+  auto a_storage = storage::make(4 * sizeof(float));
+  auto b_storage = storage::make(4 * sizeof(float));
+  auto out_storage = storage::make(4 * sizeof(float));
+
+  std::memcpy(a_storage.data, a.buffer_data(), 4 * sizeof(float));
+  std::memcpy(b_storage.data, b.buffer_data(), 4 * sizeof(float));
+
+  a_storage.len = 4;
+  b_storage.len = 4;
+  out_storage.len = 4;
+
+  msl::add<float>(a_storage, b_storage, out_storage);
+  synchronize();
+
+  auto result = array<float>({4}, static_cast<float*>(out_storage.data));
+  CHECK(array_equal(result, {11.0f, 22.0f, 33.0f, 44.0f}));
+}
+
+TEST_CASE("msl: add int") {
+  auto a = array<int>{1, 2, 3, 4};
+  auto b = array<int>{10, 20, 30, 40};
+
+  auto a_storage = storage::make(4 * sizeof(int));
+  auto b_storage = storage::make(4 * sizeof(int));
+  auto out_storage = storage::make(4 * sizeof(int));
+
+  std::memcpy(a_storage.data, a.buffer_data(), 4 * sizeof(int));
+  std::memcpy(b_storage.data, b.buffer_data(), 4 * sizeof(int));
+
+  a_storage.len = 4;
+  b_storage.len = 4;
+  out_storage.len = 4;
+
+  msl::add<int>(a_storage, b_storage, out_storage);
+  synchronize();
+
+  auto result = array<int>({4}, static_cast<int*>(out_storage.data));
+  CHECK(array_equal(result, {11, 22, 33, 44}));
+}
+
+TEST_CASE("msl: add float broadcast") {
+  auto a_storage = storage::make(4 * sizeof(float));
+  auto b_storage = storage::make(1 * sizeof(float));
+  auto out_storage = storage::make(4 * sizeof(float));
+
+  float a_data[] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float b_data[] = {10.0f};
+  std::memcpy(a_storage.data, a_data, sizeof(a_data));
+  std::memcpy(b_storage.data, b_data, sizeof(b_data));
+
+  a_storage.len = 4;
+  b_storage.len = 1;
+  out_storage.len = 4;
+
+  msl::add<float>(a_storage, b_storage, out_storage);
+  synchronize();
+
+  auto result = array<float>({4}, static_cast<float*>(out_storage.data));
+  CHECK(array_equal(result, {11.0f, 12.0f, 13.0f, 14.0f}));
 }
 

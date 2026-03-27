@@ -1,7 +1,4 @@
-#define NS_PRIVATE_IMPLEMENTATION
-#define MTL_PRIVATE_IMPLEMENTATION
-
-#include <mtlcpp.h>
+#include <silarray.h>
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -123,21 +120,21 @@ class mnist_data {
   mutable std::vector<float> normalized_labels_;
 };
 
-mtl::array<float> mean_square_error_derivative(float dout,
-                                               const mtl::array<float>& out,
-                                               const mtl::array<float>& Y) {
+sil::array<float> mean_square_error_derivative(float dout,
+                                               const sil::array<float>& out,
+                                               const sil::array<float>& Y) {
   return dout * (2 * (out - Y)) / Y.length();
 }
 
-mtl::array<float> sigmoid_derivative(const mtl::array<float>& dout,
-                                     const mtl::array<float>& x) {
+sil::array<float> sigmoid_derivative(const sil::array<float>& dout,
+                                     const sil::array<float>& x) {
   auto y = x.sigmoid();
   return dout * (y * (1 - y));
 }
 
-std::tuple<mtl::array<float>, mtl::array<float>, mtl::array<float>>
-linear_derivative(const mtl::array<float>& dout, const mtl::array<float>& x,
-                  const mtl::array<float>& W) {
+std::tuple<sil::array<float>, sil::array<float>, sil::array<float>>
+linear_derivative(const sil::array<float>& dout, const sil::array<float>& x,
+                  const sil::array<float>& W) {
   auto dx = dout.dot(W.transpose());
   auto dW = x.transpose().dot(dout);
   auto db = dout.sum(0);
@@ -145,28 +142,28 @@ linear_derivative(const mtl::array<float>& dout, const mtl::array<float>& x,
 }
 
 struct MnistNetwork {
-  mtl::array<float> W1;
-  mtl::array<float> b1;
-  mtl::array<float> W2;
-  mtl::array<float> b2;
+  sil::array<float> W1;
+  sil::array<float> b1;
+  sil::array<float> W2;
+  sil::array<float> b2;
 
-  mtl::array<float> x_;
-  mtl::array<float> net1;
-  mtl::array<float> out1;
-  mtl::array<float> net2;
-  mtl::array<float> out2;
+  sil::array<float> x_;
+  sil::array<float> net1;
+  sil::array<float> out1;
+  sil::array<float> net2;
+  sil::array<float> out2;
 
-  mtl::array<float> Y;
+  sil::array<float> Y;
 
   MnistNetwork() {
     // Xavier initialization to prevent sigmoid saturation
-    W1 = (mtl::random({784, 50}) * 2.0 - 1.0) * (1.0 / sqrt(784.0));
-    b1 = mtl::zeros<float>({50});
-    W2 = (mtl::random({50, 10}) * 2.0 - 1.0) * (1.0 / sqrt(50.0));
-    b2 = mtl::zeros<float>({10});
+    W1 = (sil::random({784, 50}) * 2.0 - 1.0) * (1.0 / sqrt(784.0));
+    b1 = sil::zeros<float>({50});
+    W2 = (sil::random({50, 10}) * 2.0 - 1.0) * (1.0 / sqrt(50.0));
+    b2 = sil::zeros<float>({10});
   }
 
-  mtl::array<float> forward(const mtl::array<float>& x) {
+  sil::array<float> forward(const sil::array<float>& x) {
     auto n1 = x.linear(W1, b1);
     auto o1 = n1.sigmoid();
     auto n2 = o1.linear(W2, b2);
@@ -181,16 +178,15 @@ struct MnistNetwork {
     return this->out2;
   }
 
-  float loss(const mtl::array<float>& out, const mtl::array<float>& Y) {
+  float loss(const sil::array<float>& out, const sil::array<float>& Y) {
     this->Y = Y;
     return out.mean_square_error(Y);
   }
 
-  std::tuple<mtl::array<float>, mtl::array<float>, mtl::array<float>,
-             mtl::array<float>>
+  std::tuple<sil::array<float>, sil::array<float>, sil::array<float>,
+             sil::array<float>>
   backward() {
     auto dout = mean_square_error_derivative(1.0, this->out2, this->Y);
-
     dout = sigmoid_derivative(dout, this->net2);
 
     const auto& [dout1, dW2, db2] =
@@ -204,7 +200,7 @@ struct MnistNetwork {
   }
 };
 
-mtl::array<float> predict(MnistNetwork& model, const mtl::array<float>& x) {
+sil::array<float> predict(MnistNetwork& model, const sil::array<float>& x) {
   return model.forward(x).softmax();
 }
 
@@ -238,9 +234,9 @@ void train(MnistNetwork& model, const mnist_data& data, size_t epochs,
       }
 
       auto batch_X =
-          mtl::array<float>({batch_size, pixel_size}, batch_images.data());
+          sil::array<float>({batch_size, pixel_size}, batch_images.data());
       auto batch_Y =
-          mtl::array<float>({batch_size}, batch_labels.data()).one_hot(10);
+          sil::array<float>({batch_size}, batch_labels.data()).one_hot(10);
 
       auto out = model.forward(batch_X);
       auto loss = model.loss(out, batch_Y);
@@ -264,7 +260,9 @@ int main(int argc, const char** argv) {
   try {
     if (argc > 1) {
       if (std::string("--cpu") == argv[1]) {
-        mtl::use_cpu();
+        sil::use_cpu();
+      } else if (std::string("--gpu") == argv[1]) {
+        sil::use_mps();
       }
     }
 
@@ -285,10 +283,10 @@ int main(int argc, const char** argv) {
     size_t accuracy_cnt = 0;
 
     for (size_t i = 0; i < test_data.size(); i += batch_size) {
-      auto x = mtl::array<float>({batch_size, test_data.image_pixel_size()},
+      auto x = sil::array<float>({batch_size, test_data.image_pixel_size()},
                                  p + test_data.image_pixel_size() * i);
       auto y = predict(m, x);
-      auto e = mtl::array<int>({batch_size}, test_data.label_data() + i);
+      auto e = sil::array<int>({batch_size}, test_data.label_data() + i);
       auto a = y.argmax();
 
       auto r = e == a;

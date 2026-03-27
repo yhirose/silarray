@@ -1,4 +1,4 @@
-#include <mtlcpp.h>
+#include <silarray.h>
 
 #include "doctest.h"
 
@@ -18,7 +18,7 @@ class LogicGate {
   }
 
  public:
-  LogicGate(mtl::array<int>&& dataset) {
+  LogicGate(sil::array<int>&& dataset) {
     auto max_iteration = 10;
     auto learning_rate = 1.0;
 

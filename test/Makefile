@@ -1,28 +1,25 @@
-METAL_CPP_DIR = ../metal-cpp_macOS14.2_iOS17.2
-
 CXX = clang++
-CXXFLAGS = -std=c++23 -O2 -I$(METAL_CPP_DIR) -I../include -framework Foundation -framework Metal -framework MetalKit
+CXXFLAGS = -std=c++23 -O2 -I../include -DACCELERATE_NEW_LAPACK -framework Foundation -framework Metal -framework Accelerate -framework MetalPerformanceShaders -framework MetalPerformanceShadersGraph
 
-INC = ../include/metal.h ../include/array.h ../include/mtlcpp.h
+INC = ../include/types.h ../include/objc.h ../include/unified_memory.h ../include/device.h ../include/cpu.h ../include/gpu.h ../include/array.h ../include/silarray.h
 
 TEST_SRC = test_array.cpp test_examples.cpp test_perceptron.cpp test_2lnn.cpp test.cpp
-BENCH_SRC = bench.cpp
 MNIST_SRC = mnist.cpp
 
-all : test bench mnist
+all : test mnist
+	@echo "=== Auto mode ==="
 	./test
-	./bench
+	@echo "=== GPU mode ==="
+	./test --gpu
+	@echo "=== CPU mode ==="
+	./test --cpu
 	./mnist
 
 test : $(INC) $(TEST_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(TEST_SRC)
 
-bench : $(INC) $(BENCH_SRC) Makefile
-	$(CXX) -o $@ $(CXXFLAGS) $(BENCH_SRC)
-
 mnist : $(INC) $(MNIST_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(MNIST_SRC)
 
 clean:
-	rm -rf test bench mnist
-
+	rm -rf test mnist

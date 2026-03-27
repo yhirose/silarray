@@ -1,7 +1,12 @@
-*.swp
-.DS_Store
-metal-cpp/*
 test/test
 test/bench
 test/mnist
-misc/
+bench/*/bench_*
+!bench/*/bench_*.cpp
+!bench/*/bench_*.h
+
+plans/
+
+.vscode/
+*.swp
+.DS_Store

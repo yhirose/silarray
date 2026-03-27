@@ -1,22 +1,21 @@
-#include <mtlcpp.h>
+#include <silarray.h>
 
 #include "doctest.h"
 
-mtl::array<float> mean_square_error_derivative(float dout,
-                                               const mtl::array<float>& out,
-                                               const mtl::array<float>& Y) {
+sil::array<float> mean_square_error_derivative(float dout,
+                                               const sil::array<float>& out,
+                                               const sil::array<float>& Y) {
   return dout * (2 * (out - Y));
 }
 
-mtl::array<float> sigmoid_derivative(const mtl::array<float>& dout,
-                                     const mtl::array<float>& x) {
-  auto y = x.sigmoid();
-  return dout * (y * (1 - y));
+sil::array<float> sigmoid_derivative(const sil::array<float>& dout,
+                                     const sil::array<float>& x) {
+  return x.sigmoid_backward(dout);
 }
 
-std::tuple<mtl::array<float>, mtl::array<float>, mtl::array<float>>
-linear_derivative(const mtl::array<float>& dout, const mtl::array<float>& x,
-                  const mtl::array<float>& W) {
+std::tuple<sil::array<float>, sil::array<float>, sil::array<float>>
+linear_derivative(const sil::array<float>& dout, const sil::array<float>& x,
+                  const sil::array<float>& W) {
   auto dx = dout.dot(W.transpose());
   auto dW = x.transpose().dot(dout);
   auto db = dout.sum(0);
@@ -24,21 +23,21 @@ linear_derivative(const mtl::array<float>& dout, const mtl::array<float>& x,
 }
 
 struct TwoLayerNeuralNetwork {
-  mtl::array<float> W1 = mtl::random({2, 3}) * 2.0 - 1.0;
-  mtl::array<float> b1 = mtl::random({3}) * 2.0 - 1.0;
+  sil::array<float> W1 = sil::random({2, 3}) * 2.0 - 1.0;
+  sil::array<float> b1 = sil::random({3}) * 2.0 - 1.0;
 
-  mtl::array<float> W2 = mtl::random({3, 1}) * 2.0 - 1.0;
-  mtl::array<float> b2 = mtl::random({1}) * 2.0 - 1.0;
+  sil::array<float> W2 = sil::random({3, 1}) * 2.0 - 1.0;
+  sil::array<float> b2 = sil::random({1}) * 2.0 - 1.0;
 
-  mtl::array<float> x;
-  mtl::array<float> net1;
-  mtl::array<float> out1;
-  mtl::array<float> net2;
-  mtl::array<float> out2;
+  sil::array<float> x;
+  sil::array<float> net1;
+  sil::array<float> out1;
+  sil::array<float> net2;
+  sil::array<float> out2;
 
-  mtl::array<float> Y;
+  sil::array<float> Y;
 
-  mtl::array<float> forward(const mtl::array<float>& x) {
+  sil::array<float> forward(const sil::array<float>& x) {
     // Input → Hidden
     auto net1 = x.linear(W1, b1);
     auto out1 = net1.sigmoid();
@@ -57,15 +56,15 @@ struct TwoLayerNeuralNetwork {
     return out2;
   }
 
-  float loss(const mtl::array<float>& out, const mtl::array<float>& Y) {
+  float loss(const sil::array<float>& out, const sil::array<float>& Y) {
     // Save variables for back propagation
     this->Y = Y;
 
     return out.mean_square_error(Y);
   }
 
-  std::tuple<mtl::array<float>, mtl::array<float>, mtl::array<float>,
-             mtl::array<float>>
+  std::tuple<sil::array<float>, sil::array<float>, sil::array<float>,
+             sil::array<float>>
   backward() {
     auto dout = mean_square_error_derivative(1.0, this->out2, this->Y);
     dout = sigmoid_derivative(dout, this->net2);
@@ -81,14 +80,14 @@ struct TwoLayerNeuralNetwork {
   }
 };
 
-mtl::array<float> predict(TwoLayerNeuralNetwork& model,
-                          const mtl::array<float>& x) {
+sil::array<float> predict(TwoLayerNeuralNetwork& model,
+                          const sil::array<float>& x) {
   auto out = model.forward(x);  // 0..1
-  return mtl::where<float>(out > 0.5, 1, 0);
+  return sil::where<float>(out > 0.5, 1, 0);
 }
 
-void train(TwoLayerNeuralNetwork& model, const mtl::array<float>& X,
-           const mtl::array<float>& Y, size_t epochs, float learning_rate) {
+void train(TwoLayerNeuralNetwork& model, const sil::array<float>& X,
+           const sil::array<float>& Y, size_t epochs, float learning_rate) {
   for (size_t epoch = 0; epoch < epochs; epoch++) {
     // Save variables for back propagation
     auto out = model.forward(X);
@@ -111,21 +110,21 @@ void train(TwoLayerNeuralNetwork& model, const mtl::array<float>& X,
 }
 
 TEST_CASE("array: mean_square_error") {
-  auto a = mtl::array<float>{1, 2, 3, 4};
-  auto b = mtl::array<float>{0, 2, 3, 6};
+  auto a = sil::array<float>{1, 2, 3, 4};
+  auto b = sil::array<float>{0, 2, 3, 6};
   auto mean = a.mean_square_error(b);
   CHECK(mean == 1.25);
 }
 
 TEST_CASE("2 layer NN: xor") {
-  auto X = mtl::array<float>{
+  auto X = sil::array<float>{
       {0, 0},
       {0, 1},
       {1, 0},
       {1, 1},
   };
 
-  auto Y_XOR = mtl::array<float>{
+  auto Y_XOR = sil::array<float>{
       {0},
       {1},
       {1},

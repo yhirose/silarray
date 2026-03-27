@@ -1,8 +1,8 @@
-#include <mtlcpp.h>
+#include <silarray.h>
 
 #include "doctest.h"
 
-using namespace mtl;
+using namespace sil;
 
 TEST_CASE("example: create empty array") {
   auto i = empty<int>({2, 3, 2});

@@ -1,9 +1,19 @@
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
 
-#define ANKERL_NANOBENCH_IMPLEMENT
-#include "nanobench.h"
+#include <silarray.h>
+#include <cstring>
 
-#define NS_PRIVATE_IMPLEMENTATION
-#define MTL_PRIVATE_IMPLEMENTATION
-#include <Metal/Metal.hpp>
+int main(int argc, char **argv) {
+  for (int i = 1; i < argc; i++) {
+    if (std::strcmp(argv[i], "--cpu") == 0) {
+      sil::use_cpu();
+    } else if (std::strcmp(argv[i], "--gpu") == 0) {
+      sil::use_mps();
+    }
+  }
+
+  doctest::Context context;
+  context.applyCommandLine(argc, argv);
+  return context.run();
+}
